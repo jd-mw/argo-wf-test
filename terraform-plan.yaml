@@ -1,0 +1,64 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  annotations:
+    workflows.argoproj.io/description: Plan the terraform
+    workflows.argoproj.io/maintainer: 'good_people'
+    workflows.argoproj.io/tags: terraform
+    workflows.argoproj.io/version: '>= 2.9.0'
+  name: terraform-plan
+  namespace: argocd
+spec:
+  #serviceAccountName: argo-terraform
+  entrypoint: update
+  arguments:
+    parameters:
+      - name: image
+        value: "apresti12/argo-terraform:latest"
+      - name: terraform_script_repository
+        value: "https://github.com/jd-mw/argo-wf-test.git"
+
+  templates:
+    - name: update
+      dag:
+        tasks:
+          - name: plan
+            template: plan
+            inputs:
+              artifacts:
+                - name: terraform
+                  path: /home/argo
+                  git:
+                    repo: "{{workflow.parameters.terraform_script_repository}}"
+                    depth: 1
+            script:
+              imagePullPolicy: "Always"
+              image: "{{workflow.parameters.image}}"
+              command: ["sh"]
+              source: |
+                terraform -chdir=/home/argo/terraform/dev init -input=false
+                echo "Init Complete"
+                terraform -chdir=/home/argo/terraform/dev plan -parallelism=2 -input=false -no-color -out=/home/argo/tfclientsplan >> /home/argo/terraform-change.log
+                echo "Plan Complete"
+                cat /home/argo/terraform-change.log
+            outputs:
+              artifacts:
+                - name: terraform-plan
+                  path: /home/argo/
+                  gcs:
+                    bucket: mw-argo-workflows-artifacts
+                    key: terraform/plan
+                  archive:
+                    none: {}
+                - name: terraform-log
+                  path: /home/argo/terraform-change.log
+                  gcs:
+                    bucket: mw-argo-workflows-artifacts
+                    key: terraform/log
+                  archive:
+                    none: {}
+    - name: plan
+      dag:
+        tasks:
+          - name: plan
+            template: plan
